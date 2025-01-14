@@ -174,7 +174,7 @@ async def get_emotes(req: Request, req_uuid: str):
         EMOTES_LOCKS.setdefault(req_uuid, asyncio.Lock())
 
     async with EMOTES_LOCKS[req_uuid]:
-        if req.args.get('forcerefresh') or user.last_emote_fetch is None or datetime.datetime.now(datetime.timezone.utc) - user.last_emote_fetch > datetime.timedelta(hours=1):
+        if req.args.get('forcerefresh') or user.last_emote_fetch is None or datetime.datetime.now(datetime.timezone.utc) - user.last_emote_fetch > datetime.timedelta(days=1):
             # It's been a while (or never), let's get that user's emotes!
             emotes = await twitchua.request(
                 'get',
