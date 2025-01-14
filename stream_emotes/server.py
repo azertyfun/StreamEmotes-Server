@@ -15,11 +15,11 @@ import tortoise.exceptions
 from twitchAPI.twitch import Twitch
 from twitchAPI.helper import first
 
-import twitchemotes_server.db
-from twitchemotes_server.db.models.user import User
-from twitchemotes_server.db.models.oauth import OAuthState, OAuthBearer
-from twitchemotes_server.db.models.emote import Emote, UserEmote
-from twitchemotes_server import twitchua
+import stream_emotes.db
+from stream_emotes.db.models.user import User
+from stream_emotes.db.models.oauth import OAuthState, OAuthBearer
+from stream_emotes.db.models.emote import Emote, UserEmote
+from stream_emotes import twitchua
 
 APP = Sanic("twitchemotes-server")
 
@@ -28,7 +28,7 @@ def generate_password(length: int):
 
 @APP.before_server_start
 async def init(_app: Sanic):
-    await twitchemotes_server.db.init()
+    await stream_emotes.db.init()
 
 @APP.get('/')
 async def login(_req: Request):

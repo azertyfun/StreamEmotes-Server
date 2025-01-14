@@ -7,9 +7,9 @@ async def init():
         db_url=os.environ['POSTGRES_DSN'],
         modules={
             'models': [
-                'twitchemotes_server.db.models.user',
-                'twitchemotes_server.db.models.oauth',
-                'twitchemotes_server.db.models.emote',
+                'stream_emotes.db.models.user',
+                'stream_emotes.db.models.oauth',
+                'stream_emotes.db.models.emote',
             ]
         },
     )

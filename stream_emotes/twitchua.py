@@ -2,7 +2,7 @@ import os
 
 import httpx
 
-from twitchemotes_server.db.models.oauth import OAuthBearer
+from stream_emotes.db.models.oauth import OAuthBearer
 
 async def request(method: str, path: str, bearer: OAuthBearer, params: dict = None,):
     params = params or {}

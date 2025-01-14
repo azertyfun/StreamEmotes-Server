@@ -17,7 +17,7 @@ services:
       - '--port'
       - '8080'
       - '--reload'
-      - 'twitchemotes_server.server:APP'
+      - 'stream_emotes.server:APP'
 
     depends_on:
       postgres:
