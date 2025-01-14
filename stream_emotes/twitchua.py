@@ -1,12 +1,14 @@
 import os
 
 import httpx
+from sanic.log import logger
 
 from stream_emotes.db.models.oauth import OAuthBearer
 
 async def request(method: str, path: str, bearer: OAuthBearer, params: dict = None,):
     params = params or {}
     async with httpx.AsyncClient() as client:
+        logger.info('Getting TWITCH/%s ? %s', path, params)
         res = await client.request(
             method, f'https://api.twitch.tv/{path}',
             headers={

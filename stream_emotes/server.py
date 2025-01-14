@@ -9,6 +9,7 @@ import uuid
 import urllib.parse
 
 from sanic import Sanic, Request
+from sanic.log import logger
 from sanic.response import json, html, text, redirect
 
 import tortoise.exceptions
@@ -78,7 +79,7 @@ async def handle_redirect(req: Request):
             }
         )
         if res.status_code >= 400:
-            print(res.json())
+            sanic.log("Error getting token: %s", res.json())
             return text('Error getting token', status=res.status_code)
 
         token = res.json()
@@ -135,8 +136,13 @@ async def handle_redirect(req: Request):
         </form>
     ''')
 
+EMOTES_LOCK = asyncio.Lock()
+EMOTES_LOCKS = {}
+
 @APP.post('/set-username')
 async def set_username(req: Request):
+    logger.info('Trying to set username')
+
     username = req.form.get('username')
     temp_token = req.form.get('temp-token')
 
@@ -144,36 +150,28 @@ async def set_username(req: Request):
         return text('Missing form data', status=400)
 
     async with httpx.AsyncClient() as client:
-        res = await client.get(f'https://playerdb.co/api/player/minecraft/{username}')
+        res = await client.get(f'https://playerdb.co/api/player/minecraft/{username.lower()}') # for some reason I get a 500 on a non-lowered username
+        logger.info('GOT SHIT')
         if res.status_code >= 400 and res.status_code < 500:
             return text('Invalid username', status=400)
         res.raise_for_status()
 
         minecraft_uuid = uuid.UUID(res.json()['data']['player']['raw_id'])
 
-    print('Getting user')
     user = await User.get(temp_token=temp_token, temp_token_expires_at__gte=datetime.datetime.now())
     user.minecraft_uuid = minecraft_uuid
-    print('Saving user')
     await user.save()
 
-    print('Locking EMOTES_LOCK')
     async with EMOTES_LOCK:
-        print('Locked EMOTES_LOCK')
         EMOTES_LOCKS.setdefault(minecraft_uuid, asyncio.Lock())
 
-    print('Locking EMOTES_LOCKS')
     async with EMOTES_LOCKS[minecraft_uuid]:
-        print('Locked EMOTES_LOCKS')
         await fetch_user_emotes(user, minecraft_uuid)
 
     return text('Success! You can close this now :)')
 
-EMOTES_LOCK = asyncio.Lock()
-EMOTES_LOCKS = {}
-
 async def fetch_user_emotes(user: User, req_uuid: uuid.UUID):
-    print(f'Fetching user emotes for {req_uuid}')
+    logger.info(f'Fetching user emotes for {req_uuid}')
 
     emotes = await twitchua.request(
         'get',
@@ -181,6 +179,7 @@ async def fetch_user_emotes(user: User, req_uuid: uuid.UUID):
         await user.oauth_bearer,
         {'user_id': (await user.oauth_bearer).twitch_id}
     )
+    logger.info('GOT %d EMOTES FROM TWITCH', len(emotes['data']))
 
     emote_objects = []
     for emote in emotes['data']:
@@ -199,21 +198,24 @@ async def fetch_user_emotes(user: User, req_uuid: uuid.UUID):
         )
         emote_objects.append(emote_object)
 
-        await emote_object.save(update_fields=['animated', 'url'])
-
     await Emote.bulk_create(emote_objects, on_conflict=['name'], update_fields=['animated', 'url'])
 
-    user_emote_objects = [
-        UserEmote(
-            user=user,
-            emote=emote
-        )
-        for emote in emote_objects
-    ]
-    await UserEmote.bulk_create(user_emote_objects, ignore_conflicts=True)
+    logger.info('Saved emotes')
+
+    await tortoise.connections.get('default').execute_many(
+        'INSERT INTO "useremote" ("user_id", "emote_id") VALUES ($1, $2) ON CONFLICT DO NOTHING;',
+        [
+            [user.id, emote.id]
+            for emote in emote_objects
+        ]
+    )
+
+    logger.info('Saved emote associations')
 
     user.last_emote_fetch = datetime.datetime.now()
     await user.save()
+
+    logger.info('Done fetching user emotes')
 
 @APP.get('/v1/emotes')
 async def get_all_emotes(_req: Request):
@@ -243,17 +245,11 @@ async def get_emotes(req: Request, req_uuid: str):
 
     async with EMOTES_LOCKS[req_uuid]:
         if req.args.get('forcerefresh') or user.last_emote_fetch is None or datetime.datetime.now(datetime.timezone.utc) - user.last_emote_fetch > datetime.timedelta(days=1):
-            # It's been a while (or never), let's get that user's emotes!
-            fetch_user_emotes(user, req_uuid)
+        # It's been a while (or never), let's get that user's emotes!
+            await fetch_user_emotes(user, req_uuid)
 
-    print('Filtering')
-    t0 = time.monotonic()
     user_emotes = await UserEmote.filter(user=user).prefetch_related('emote')
-    t1 = time.monotonic()
-    print(f'Done in {round(t1 - t0, 2)} s')
 
-    print('Rendering')
-    t0 = time.monotonic()
     out = []
     for emote in user_emotes:
         emote_ = await emote.emote
@@ -263,6 +259,4 @@ async def get_emotes(req: Request, req_uuid: str):
             'animated': emote_.animated,
             'url': emote_.url
         })
-    t1 = time.monotonic()
-    print(f'Done in {round(t1 - t0, 2)} s')
     return json(out)
