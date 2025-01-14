@@ -1,0 +1,14 @@
+name: Build image
+run-name: ${{ forgejo.actor }} building image
+on: [push]
+jobs:
+  Make-And-Deploy:
+    runs-on: docker
+    container:
+      image: python:3-alpine
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+      - run: docker build -t registry:5000/stream-emotes:latest .
+      - run: push registry:5000/stream-emotes:latest
