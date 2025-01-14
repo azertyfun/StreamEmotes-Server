@@ -240,10 +240,13 @@ async def get_emotes(req: Request, req_uuid: str):
             # It's been a while (or never), let's get that user's emotes!
             fetch_user_emotes(user, req_uuid)
 
+    print('Filtering')
     t0 = time.monotonic()
     user_emotes = await UserEmote.filter(user=user).prefetch_related('emote')
     t1 = time.monotonic()
+    print(f'Done in {round(t1 - t0, 2)} s')
 
+    print('Rendering')
     t0 = time.monotonic()
     out = []
     for emote in user_emotes:
@@ -255,4 +258,5 @@ async def get_emotes(req: Request, req_uuid: str):
             'url': emote_.url
         })
     t1 = time.monotonic()
+    print(f'Done in {round(t1 - t0, 2)} s')
     return json(out)
