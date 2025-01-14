@@ -200,9 +200,9 @@ async def get_emotes(req: Request, req_uuid: str):
                 )
                 emote_objects.append(emote_object)
 
-                await emote_object.save(update_fields=['animated', 'url']) # JFC I hate ORMs. Hate hate hate. CAN'T refer to the foreign key without using a .save()'d object. SO THE FUCKING BULK_CREATE FUNCTION SERVES NO FUCKING PURPOSE.
+                await emote_object.save(update_fields=['animated', 'url'])
 
-            # await Emote.bulk_create(emote_objects, on_conflict=['name'], update_fields=['animated', 'url'])
+            await Emote.bulk_create(emote_objects, on_conflict=['name'], update_fields=['animated', 'url'])
 
             user_emote_objects = [
                 UserEmote(
