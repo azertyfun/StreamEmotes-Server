@@ -96,14 +96,16 @@ async def handle_redirect(req: Request):
         twitch_user = res.json()
 
     # Save the new Twitch token
-    bearer, _ = await OAuthBearer.update_or_create(
+    bearer, _ = await OAuthBearer.get_or_create(
         twitch_id=twitch_user['data'][0]['id'],
         login=twitch_user['data'][0]['login'],
-        display_name=twitch_user['data'][0]['display_name'],
-        access_token=token['access_token'],
-        refresh_token=token['refresh_token'],
-        expires_at=datetime.datetime.now() + datetime.timedelta(seconds=token['expires_in'])
     )
+
+    bearer.display_name = twitch_user['data'][0]['display_name']
+    bearer.access_token = token['access_token']
+    bearer.refresh_token = token['refresh_token']
+    bearer.expires_at = datetime.datetime.now() + datetime.timedelta(seconds=token['expires_in'])
+    await bearer.save()
 
     # Give our user some temporary credentials so they can prove they are the ones setting the minecraft username in the follow-up query
     user, _ = await User.update_or_create(
