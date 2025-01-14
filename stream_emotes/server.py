@@ -96,29 +96,40 @@ async def handle_redirect(req: Request):
         twitch_user = res.json()
 
     # Save the new Twitch token
-    bearer, _ = await OAuthBearer.get_or_create(
-        twitch_id=twitch_user['data'][0]['id'],
-        login=twitch_user['data'][0]['login'],
-    )
-
-    bearer.display_name = twitch_user['data'][0]['display_name']
-    bearer.access_token = token['access_token']
-    bearer.refresh_token = token['refresh_token']
-    bearer.expires_at = datetime.datetime.now() + datetime.timedelta(seconds=token['expires_in'])
+    try:
+        bearer = await OAuthBearer.get(twitch_id=twitch_user['data'][0]['id'])
+        bearer.access_token = token['access_token']
+        bearer.refresh_token = token['refresh_token']
+        bearer.expires_at = datetime.datetime.now() + datetime.timedelta(seconds=token['expires_in'])
+    except tortoise.exceptions.DoesNotExist:
+        bearer = OAuthBearer(
+            twitch_id=twitch_user['data'][0]['id'],
+            login=twitch_user['data'][0]['login'],
+            display_name=twitch_user['data'][0]['display_name'],
+            access_token=token['access_token'],
+            refresh_token=token['refresh_token'],
+            expires_at=datetime.datetime.now() + datetime.timedelta(seconds=token['expires_in'])
+        )
     await bearer.save()
 
     # Give our user some temporary credentials so they can prove they are the ones setting the minecraft username in the follow-up query
-    user, _ = await User.update_or_create(
-        temp_token=generate_password(256),
-        temp_token_expires_at=datetime.datetime.now() + datetime.timedelta(minutes=5),
-        oauth_bearer=bearer
-    )
-
-    print(user)
+    try:
+        user = await User.get(
+            twitch_id=bearer.twitch_id
+        )
+        user.oauth_bearer = bearer
+    except tortoise.exceptions.DoesNotExist:
+        user = User(
+            twitch_id=bearer.twitch_id,
+            oauth_bearer=bearer
+        )
+    user.temp_token = generate_password(256)
+    user.temp_token_expires_at = datetime.datetime.now() + datetime.timedelta(minutes=5)
+    await user.save()
 
     return html(f'''
         <form method="POST" action="/set-username">
-            <label for="username">Username: </label><input type="text" id="username" name="username" placeholder="Username">
+            <label for="username">Minecraft username: </label><input type="text" id="username" name="username" placeholder="Username">
             <input type="hidden" name="temp-token" value="{user.temp_token}">
             <input type="submit">
         </form>
@@ -144,10 +155,59 @@ async def set_username(req: Request):
     user.minecraft_uuid = minecraft_uuid
     await user.save()
 
+    async with EMOTES_LOCK:
+        EMOTES_LOCKS.setdefault(minecraft_uuid, asyncio.Lock())
+
+    async with EMOTES_LOCKS[minecraft_uuid]:
+        await fetch_user_emotes(user, minecraft_uuid)
+
     return text('Success! You can close this now :)')
 
 EMOTES_LOCK = asyncio.Lock()
 EMOTES_LOCKS = {}
+
+async def fetch_user_emotes(user: User, req_uuid: uuid.UUID):
+    print(f'Fetching user emotes for {req_uuid}')
+
+    emotes = await twitchua.request(
+        'get',
+        f'helix/chat/emotes/user',
+        await user.oauth_bearer,
+        {'user_id': (await user.oauth_bearer).twitch_id}
+    )
+
+    emote_objects = []
+    for emote in emotes['data']:
+        animated = 'animated' in emote['format']
+        url = emotes['template'] \
+            .replace('{{id}}', emote['id']) \
+            .replace('{{format}}', 'animated' if animated else 'static') \
+            .replace('{{theme_mode}}', 'dark') \
+            .replace('{{scale}}', emote['scale'][-1])
+
+        emote_object = Emote(
+            id=emote['id'],
+            name=emote['name'],
+            animated=animated,
+            url=url
+        )
+        emote_objects.append(emote_object)
+
+        await emote_object.save(update_fields=['animated', 'url'])
+
+    await Emote.bulk_create(emote_objects, on_conflict=['name'], update_fields=['animated', 'url'])
+
+    user_emote_objects = [
+        UserEmote(
+            user=user,
+            emote=emote
+        )
+        for emote in emote_objects
+    ]
+    await UserEmote.bulk_create(user_emote_objects, ignore_conflicts=True)
+
+    user.last_emote_fetch = datetime.datetime.now()
+    await user.save()
 
 @APP.get('/v1/emotes')
 async def get_all_emotes(_req: Request):
@@ -178,54 +238,21 @@ async def get_emotes(req: Request, req_uuid: str):
     async with EMOTES_LOCKS[req_uuid]:
         if req.args.get('forcerefresh') or user.last_emote_fetch is None or datetime.datetime.now(datetime.timezone.utc) - user.last_emote_fetch > datetime.timedelta(days=1):
             # It's been a while (or never), let's get that user's emotes!
-            emotes = await twitchua.request(
-                'get',
-                f'helix/chat/emotes/user',
-                await user.oauth_bearer,
-                {'user_id': (await user.oauth_bearer).twitch_id}
-            )
+            fetch_user_emotes(user, req_uuid)
 
-            emote_objects = []
-            for emote in emotes['data']:
-                animated = 'animated' in emote['format']
-                url = emotes['template'] \
-                    .replace('{{id}}', emote['id']) \
-                    .replace('{{format}}', 'animated' if animated else 'static') \
-                    .replace('{{theme_mode}}', 'dark') \
-                    .replace('{{scale}}', emote['scale'][-1])
+    t0 = time.monotonic()
+    user_emotes = await UserEmote.filter(user=user).prefetch_related('emote')
+    t1 = time.monotonic()
 
-                emote_object = Emote(
-                    id=emote['id'],
-                    name=emote['name'],
-                    animated=animated,
-                    url=url
-                )
-                emote_objects.append(emote_object)
-
-                await emote_object.save(update_fields=['animated', 'url'])
-
-            await Emote.bulk_create(emote_objects, on_conflict=['name'], update_fields=['animated', 'url'])
-
-            user_emote_objects = [
-                UserEmote(
-                    user=user,
-                    emote=emote
-                )
-                for emote in emote_objects
-            ]
-            await UserEmote.bulk_create(user_emote_objects, ignore_conflicts=True)
-
-            user.last_emote_fetch = datetime.datetime.now()
-            await user.save()
-
-    user_emotes = await UserEmote.filter(user=user).prefetch_related()
-
-    return json([
-        {
-            'id': (await emote.emote).id,
-            'name': (await emote.emote).name,
-            'animated': (await emote.emote).animated,
-            'url': (await emote.emote).url
-        }
-        for emote in user_emotes
-    ])
+    t0 = time.monotonic()
+    out = []
+    for emote in user_emotes:
+        emote_ = await emote.emote
+        out.append({
+            'id': emote_.id,
+            'name': emote_.name,
+            'animated': emote_.animated,
+            'url': emote_.url
+        })
+    t1 = time.monotonic()
+    return json(out)
