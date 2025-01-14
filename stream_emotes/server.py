@@ -183,8 +183,7 @@ async def get_emotes(req: Request, req_uuid: str):
                 {'user_id': (await user.oauth_bearer).twitch_id}
             )
 
-            print(emotes)
-
+            emote_objects = []
             for emote in emotes['data']:
                 animated = 'animated' in emote['format']
                 url = emotes['template'] \
@@ -192,17 +191,27 @@ async def get_emotes(req: Request, req_uuid: str):
                     .replace('{{format}}', 'animated' if animated else 'static') \
                     .replace('{{theme_mode}}', 'dark') \
                     .replace('{{scale}}', emote['scale'][-1])
-                print(f'Creating emote {emote["name"]} for {user.minecraft_uuid}')
-                dbe, _  = await Emote.update_or_create(
+
+                emote_object = Emote(
                     id=emote['id'],
                     name=emote['name'],
                     animated=animated,
                     url=url
                 )
-                await UserEmote.update_or_create(
+                emote_objects.append(emote_object)
+
+                await emote_object.save(force_update=True) # JFC I hate ORMs. Hate hate hate. CAN'T refer to the foreign key without using a .save()'d object. SO THE FUCKING BULK_CREATE FUNCTION SERVES NO FUCKING PURPOSE.
+
+            # await Emote.bulk_create(emote_objects, on_conflict=['name'], update_fields=['animated', 'url'])
+
+            user_emote_objects = [
+                UserEmote(
                     user=user,
-                    emote=dbe
+                    emote=emote
                 )
+                for emote in emote_objects
+            ]
+            await UserEmote.bulk_create(user_emote_objects, ignore_conflicts=True)
 
             user.last_emote_fetch = datetime.datetime.now()
             await user.save()
