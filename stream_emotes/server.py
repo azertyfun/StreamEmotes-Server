@@ -151,14 +151,20 @@ async def set_username(req: Request):
 
         minecraft_uuid = uuid.UUID(res.json()['data']['player']['raw_id'])
 
+    print('Getting user')
     user = await User.get(temp_token=temp_token, temp_token_expires_at__gte=datetime.datetime.now())
     user.minecraft_uuid = minecraft_uuid
+    print('Saving user')
     await user.save()
 
+    print('Locking EMOTES_LOCK')
     async with EMOTES_LOCK:
+        print('Locked EMOTES_LOCK')
         EMOTES_LOCKS.setdefault(minecraft_uuid, asyncio.Lock())
 
+    print('Locking EMOTES_LOCKS')
     async with EMOTES_LOCKS[minecraft_uuid]:
+        print('Locked EMOTES_LOCKS')
         await fetch_user_emotes(user, minecraft_uuid)
 
     return text('Success! You can close this now :)')
