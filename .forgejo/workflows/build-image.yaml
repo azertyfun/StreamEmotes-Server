@@ -2,13 +2,14 @@ name: Build image
 run-name: ${{ forgejo.actor }} building image
 on: [push]
 jobs:
-  Make-And-Deploy:
+  Build:
     runs-on: docker
     container:
-      image: python:3-alpine
+      image: node:22-alpine
+    env:
+      DOCKER_HOST: tcp://forgejo-dind:2375
     steps:
-      - uses: actions/checkout@v3
-        with:
-          submodules: true
-      - run: docker build -t registry:5000/stream-emotes:latest .
-      - run: push registry:5000/stream-emotes:latest
+      - run: apk add --no-cache git openssh-client docker
+      - uses: actions/checkout@v4
+      - run: docker build -t registry.e4b4.eu/stream-emotes:latest .
+      - run: docker push registry.e4b4.eu/stream-emotes:latest
