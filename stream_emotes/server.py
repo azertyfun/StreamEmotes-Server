@@ -79,7 +79,7 @@ async def handle_redirect(req: Request):
             }
         )
         if res.status_code >= 400:
-            sanic.log("Error getting token: %s", res.json())
+            logger.warning("Error getting token: %s", res.json())
             return text('Error getting token', status=res.status_code)
 
         token = res.json()
