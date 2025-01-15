@@ -154,7 +154,9 @@ async def set_username(req: Request):
         logger.info('GOT SHIT')
         if res.status_code >= 400 and res.status_code < 500:
             return text('Invalid username', status=400)
-        res.raise_for_status()
+        if res.status_code >= 500:
+            logger.warning('Failed getting MC UUID for %s: %s', username, res.text)
+            res.raise_for_status()
 
         minecraft_uuid = uuid.UUID(res.json()['data']['player']['raw_id'])
 
