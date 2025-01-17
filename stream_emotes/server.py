@@ -247,8 +247,13 @@ async def get_emotes(req: Request, req_uuid: str):
 
     async with EMOTES_LOCKS[req_uuid]:
         if req.args.get('forcerefresh') or user.last_emote_fetch is None or datetime.datetime.now(datetime.timezone.utc) - user.last_emote_fetch > datetime.timedelta(days=1):
-        # It's been a while (or never), let's get that user's emotes!
-            await fetch_user_emotes(user, req_uuid)
+            # It's been a while (or never), let's get that user's emotes!
+            # We don't actually wait for this, because it can take a while and if the client has to
+            # wait too long to get emotes, it causes issues (messages not showing up and/or
+            # disconnections due to message verification issues)
+            #
+            # These should probably be fixed client-side tbh... But I'm lazy.
+            asyncio.ensure_future(fetch_user_emotes(user, req_uuid))
 
     user_emotes = await UserEmote.filter(user=user).prefetch_related('emote')
 
