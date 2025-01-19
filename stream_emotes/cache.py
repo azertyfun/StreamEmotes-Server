@@ -3,6 +3,12 @@ import time
 
 from sanic.log import logger
 
+class CacheItem:
+    def __init__(self):
+        self.lock = asyncio.Lock()
+        self.expires = 0
+        self.value = None
+
 def cache(timeout: int):
     def cache_impl(fun):
         cached = {}
@@ -15,13 +21,18 @@ def cache(timeout: int):
                 return await fun(request, **kwargs)
 
             cache_key = tuple(sorted(kwargs.items()))
-            if not cached.get(cache_key) or time.monotonic() > cached[cache_key]['expires']:
-                async with lock:
-                    logger.info('Cache miss')
-                    cached[cache_key] = {
-                        'val': await fun(request, **kwargs),
-                        'expires': time.monotonic() + timeout,
-                    }
-            return cached[cache_key]['val']
+
+            async with lock:
+                cached.setdefault(cache_key, CacheItem())
+
+            item = cached[cache_key]
+
+            async with item.lock:
+                if time.monotonic() > item.expires:
+                    async with lock:
+                        logger.info('Cache miss')
+                        item.value = await fun(request, **kwargs)
+                        item.expires = time.monotonic() + timeout
+                return item.value
         return wrapper
     return cache_impl
