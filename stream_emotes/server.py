@@ -21,6 +21,7 @@ from stream_emotes.db.models.user import User
 from stream_emotes.db.models.oauth import OAuthState, OAuthBearer
 from stream_emotes.db.models.emote import Emote, UserEmote
 from stream_emotes import twitchua
+from stream_emotes.cache import cache
 
 APP = Sanic("twitchemotes-server")
 
@@ -234,6 +235,7 @@ async def get_all_emotes(_req: Request):
     ])
 
 @APP.get('/v1/emotes/<req_uuid>')
+@cache(60)
 async def get_emotes(req: Request, req_uuid: str):
     req_uuid = uuid.UUID(req_uuid)
 
