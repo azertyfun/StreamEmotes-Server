@@ -266,4 +266,9 @@ async def get_emotes(req: Request, req_uuid: str):
             'animated': emote_.animated,
             'url': emote_.url
         })
-    return json(out)
+    return json(
+        out,
+        headers={
+            'Cache-Control': 'max-age=60, public'
+        }
+    )
